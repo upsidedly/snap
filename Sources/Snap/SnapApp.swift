@@ -34,7 +34,6 @@ final class SnapDelegate: NSObject, NSApplicationDelegate {
     private var keyMonitor: Any?
     private var permissionWindow: NSWindow?
     private var receiptWindow: NSPanel?
-    private var previousApp: NSRunningApplication?
     private var mode = CaptureMode.select
     private var savesToFile = false
     private var lastFile: URL?
@@ -190,7 +189,6 @@ final class SnapDelegate: NSObject, NSApplicationDelegate {
             return
         }
         permissionWindow?.close()
-        previousApp = NSWorkspace.shared.frontmostApplication
         phase = .preparing
         let token = UUID()
         session = token
@@ -198,7 +196,7 @@ final class SnapDelegate: NSObject, NSApplicationDelegate {
         captureTask = Task { [weak self] in
             guard let self else { return }
             do {
-                // Freeze before activating Snap or drawing any capture controls.
+                // Freeze before drawing any capture controls.
                 // The content filter excludes Snap's own windows, so no delay is needed.
                 let snapshots = try await self.engine.snapshots()
                 try Task.checkCancellation()
@@ -236,10 +234,11 @@ final class SnapDelegate: NSObject, NSApplicationDelegate {
         toolbar.onSaveToggle = { [weak self] in self?.toggleSaving() }
         self.toolbar = toolbar
         phase = .selecting
-        NSApp.activate()
+        // Nonactivating panels take keyboard focus without changing the active app or Space.
         let active = overlays.first { $0.snapshot.screen.frame.contains(NSEvent.mouseLocation) } ?? overlays.first
         if let active { activateOverlay(active) }
         toolbar.orderFrontRegardless()
+        active?.refreshCursor()
     }
 
     private func activateOverlay(_ overlay: SelectionOverlay) {
@@ -299,7 +298,6 @@ final class SnapDelegate: NSObject, NSApplicationDelegate {
         captureTask?.cancel()
         captureTask = nil
         resetSession()
-        restorePreviousApp()
     }
 
     private func closeCaptureUI() {
@@ -318,13 +316,6 @@ final class SnapDelegate: NSObject, NSApplicationDelegate {
         phase = .idle
     }
 
-    private func restorePreviousApp() {
-        if previousApp?.processIdentifier != ProcessInfo.processInfo.processIdentifier {
-            previousApp?.activate(options: [])
-        }
-        previousApp = nil
-    }
-
     private func finishCapture(_ choice: CaptureChoice) {
         guard phase == .selecting else { return }
         phase = .saving
@@ -332,7 +323,6 @@ final class SnapDelegate: NSObject, NSApplicationDelegate {
         let directory = saveDirectory
         let screen = activeOverlay?.snapshot.screen ?? NSScreen.main
         closeCaptureUI()
-        restorePreviousApp()
         let token = session
         captureTask = Task { [weak self] in
             guard let self else { return }

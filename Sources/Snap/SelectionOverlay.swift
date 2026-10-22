@@ -13,10 +13,12 @@ final class CapturePanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     init(screen: NSScreen, view: NSView) {
-        super.init(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        super.init(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         isOpaque = true
         backgroundColor = .black
         hasShadow = false
+        hidesOnDeactivate = false
+        animationBehavior = .none
         level = .screenSaver
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         acceptsMouseMovedEvents = true
@@ -47,6 +49,7 @@ final class SelectionOverlay: NSView {
             updateAccessibilityState()
             updateHover()
             window?.invalidateCursorRects(for: self)
+            refreshCursor()
             needsDisplay = true
         }
     }
@@ -74,14 +77,30 @@ final class SelectionOverlay: NSView {
 
     override func updateTrackingAreas() {
         if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(rect: bounds, options: [.activeAlways, .mouseMoved, .mouseEnteredAndExited, .inVisibleRect], owner: self)
+        let area = NSTrackingArea(rect: bounds,
+            options: [.activeAlways, .mouseMoved, .mouseEnteredAndExited, .cursorUpdate,
+                      .inVisibleRect, .enabledDuringMouseDrag], owner: self)
         tracking = area
         addTrackingArea(area)
         super.updateTrackingAreas()
     }
 
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: mode == .region ? .pointingHand : .crosshair)
+        addCursorRect(bounds, cursor: captureCursor)
+    }
+
+    private var captureCursor: NSCursor { mode == .region ? .pointingHand : .crosshair }
+
+    override func cursorUpdate(with event: NSEvent) {
+        captureCursor.set()
+    }
+
+    func refreshCursor() {
+        // A keyboard mode change must not replace the toolbar's cursor or another display's cursor.
+        guard let window, window.isVisible,
+              NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0)
+                == window.windowNumber else { return }
+        captureCursor.set()
     }
 
     override func mouseEntered(with event: NSEvent) { activateAndHover() }
@@ -89,6 +108,7 @@ final class SelectionOverlay: NSView {
 
     private func activateAndHover() {
         onActive?(self)
+        captureCursor.set()
         updateHover()
     }
 
@@ -110,6 +130,7 @@ final class SelectionOverlay: NSView {
 
     override func mouseDown(with event: NSEvent) {
         onActive?(self)
+        captureCursor.set()
         switch mode {
         case .select:
             start = localPoint(event)
@@ -123,6 +144,7 @@ final class SelectionOverlay: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         guard mode == .select, let start else { return }
+        captureCursor.set()
         selection = CaptureGeometry.rectangle(from: start, to: localPoint(event))
         needsDisplay = true
         onStateChanged?()
@@ -203,11 +225,13 @@ final class CaptureToolbar: NSPanel {
 
     init() {
         segments = NSSegmentedControl(labels: CaptureMode.allCases.map(\.title), trackingMode: .selectOne, target: nil, action: nil)
-        super.init(contentRect: CGRect(x: 0, y: 0, width: 360, height: 44), styleMask: [.borderless], backing: .buffered, defer: false)
+        super.init(contentRect: CGRect(x: 0, y: 0, width: 360, height: 44), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         title = "Snap Capture"
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
+        hidesOnDeactivate = false
+        animationBehavior = .none
         level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         isReleasedWhenClosed = false
