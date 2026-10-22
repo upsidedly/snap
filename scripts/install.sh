@@ -1,6 +1,10 @@
 #!/bin/zsh
 set -euo pipefail
 PROJECT_DIR=${0:A:h:h}
+if pgrep -x Snap >/dev/null; then
+    print -u2 'Quit Snap before installing an update.'
+    exit 1
+fi
 "$PROJECT_DIR/scripts/build.sh"
 if [[ -e /Applications/Snap.app ]]; then
     BACKUP_DIR="$HOME/Library/Application Support/Snap/Backups/$(date +%Y%m%d-%H%M%S)"

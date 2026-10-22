@@ -48,7 +48,7 @@ open /Applications/Snap.app
 
 Allow Screen Recording when macOS asks. You can change access in **System Settings → Privacy & Security**.
 
-The script builds and signs the app locally. It keeps a backup of an earlier Snap installation. There is no notarized download yet. After you rebuild, macOS may ask you to allow screen access again.
+Quit Snap before installing an update. The script builds and signs the app locally and keeps a backup of an earlier installation. The first build creates a signing key in your login Keychain, then reuses it so screen access survives rebuilds. Updating from an older ad hoc build needs one final Screen Recording approval. There is no notarized download yet.
 
 ## Privacy
 
