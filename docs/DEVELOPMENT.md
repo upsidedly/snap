@@ -5,7 +5,9 @@ Snap uses Swift 6 and targets macOS 14 or later. It has no package dependencies.
 - AppKit owns the menu bar, settings popup, capture panels and pointer events.
 - SwiftUI draws the settings, permission and result views.
 - ScreenCaptureKit takes each display image before the capture controls appear.
-- Each capture mode uses that stored image. Region crops the visible window area; it does not capture hidden content behind other windows. For a window that spans displays, it captures the part on the current display.
+- Each capture mode uses that stored image. App crops the visible window area; it does not capture hidden content behind other windows. For a window that spans displays, it captures the part on the current display.
+- Region uses Vision's [rectangle detection](https://developer.apple.com/documentation/vision/vndetectrectanglesrequest) on those frozen pixels to find sections within a window. A separate actor analyzes each display after the capture controls appear. Cancellation and the capture session token discard stale results. No Accessibility permission or network service is involved.
+- Region chooses the smallest detected section under the pointer within the frontmost window. Detection is geometric, so borderless sections may fall back to the whole window; Select remains the exact-area fallback. Tab cycles sections and their containing windows, while App cycles only windows.
 - The capture controller owns cancellation, mode changes and output. An actor encodes PNG images and writes files.
 - The global shortcut uses Carbon. Snap does not need Accessibility access for it.
 - The menu bar and app icon use the same original capture-frame artwork in `SnapIcon.swift`.
@@ -28,7 +30,7 @@ Run `./scripts/check-signing.sh` after building to verify that two different app
 
 ## Checks
 
-The tests cover mode wrapping, Retina crop boundaries, display coordinates, reverse drags, small clicks, cursor updates, frozen-image data, PNG encoding and distinct output filenames. Native pointer tests call the AppKit event handlers with real `NSEvent` values, including stale arrow/text cursors and the cursor for each capture mode.
+The tests cover four-mode wrapping, Retina crop boundaries, display coordinates, reverse drags, small clicks, cursor updates, frozen-image data, PNG encoding and distinct output filenames. Region fixtures verify multiple detected sections, Retina/negative display coordinates and cancellation. Targeting tests cover nested sections, overlapping windows, fallback, keyboard cycling and App versus Region capture. Native pointer tests call the AppKit event handlers with real `NSEvent` values, including stale arrow/text cursors and the cursor for each capture mode.
 
 Live checks on macOS 27.2 used one 1512 × 982-point Retina display at 2×. Full-screen output measured 3024 × 1964 pixels. The saved PNG matched the clipboard bytes. Saving off created no file; saving on created one. Each new capture reset saving to off.
 

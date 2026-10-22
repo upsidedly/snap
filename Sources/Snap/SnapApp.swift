@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 import SnapCore
+import OSLog
 
 @main
 @MainActor
@@ -20,11 +21,13 @@ final class SnapDelegate: NSObject, NSApplicationDelegate {
     enum Phase { case idle, preparing, selecting, saving }
     private var phase = Phase.idle
     private let engine = CaptureEngine()
+    private let regionDetector = RegionDetector()
     private let store = ScreenshotStore()
     private var statusItem: NSStatusItem?
     private var settingsPopover: NSPopover?
     private var shortcut: GlobalShortcut?
     private var captureTask: Task<Void, Never>?
+    private var regionTask: Task<Void, Never>?
     private var receiptTask: Task<Void, Never>?
     private var session = UUID()
     private var panels: [CapturePanel] = []
@@ -72,6 +75,7 @@ final class SnapDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         captureTask?.cancel()
+        regionTask?.cancel()
         receiptTask?.cancel()
         shortcut?.unregister()
         settingsPopover?.performClose(nil)
@@ -215,11 +219,11 @@ final class SnapDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func presentCapture(_ snapshots: [DisplaySnapshot]) {
-        let regions = engine.windowRegions()
+        let windows = engine.windowRegions()
         mode = .select
         savesToFile = false
         for snapshot in snapshots {
-            let overlay = SelectionOverlay(snapshot: snapshot, regions: regions)
+            let overlay = SelectionOverlay(snapshot: snapshot, windows: windows)
             overlay.onCapture = { [weak self] choice in self?.finishCapture(choice) }
             overlay.onActive = { [weak self] overlay in self?.activateOverlay(overlay) }
             overlay.onStateChanged = { [weak self] in self?.refreshToolbar() }
@@ -239,6 +243,31 @@ final class SnapDelegate: NSObject, NSApplicationDelegate {
         if let active { activateOverlay(active) }
         toolbar.orderFrontRegardless()
         active?.refreshCursor()
+        detectRegions(windows: windows)
+    }
+
+    private func detectRegions(windows: [WindowRegion]) {
+        let token = session
+        let canvases = overlays
+        regionTask = Task { [weak self] in
+            guard let self else { return }
+            for overlay in canvases {
+                do {
+                    let regions = try await self.regionDetector.regions(in: overlay.snapshot.image,
+                        screen: overlay.snapshot.screen.frame, windows: windows)
+                    try Task.checkCancellation()
+                    guard self.session == token, self.phase == .selecting else { return }
+                    overlay.setDetectedRegions(regions)
+                } catch is CancellationError { return }
+                catch {
+                    guard !Task.isCancelled, self.session == token, self.phase == .selecting else { return }
+                    Logger(subsystem: "dev.matthew.snap", category: "regions")
+                        .error("Section detection failed; whole-window capture remains available: \(error.localizedDescription, privacy: .public)")
+                    overlay.setDetectedRegions([])
+                }
+            }
+            if self.session == token { self.regionTask = nil }
+        }
     }
 
     private func activateOverlay(_ overlay: SelectionOverlay) {
@@ -282,10 +311,11 @@ final class SnapDelegate: NSObject, NSApplicationDelegate {
             case 126: self.toggleSaving()
             case 18: self.setMode(.select)
             case 19: self.setMode(.region)
-            case 20: self.setMode(.fullScreen)
+            case 20: self.setMode(.app)
+            case 21: self.setMode(.fullScreen)
             case 36, 76: self.activeOverlay?.capture()
             case 48:
-                guard self.mode == .region else { return event }
+                guard self.mode == .region || self.mode == .app else { return event }
                 self.activeOverlay?.cycleRegion(event.modifierFlags.contains(.shift) ? -1 : 1)
             default: return event
             }
@@ -301,6 +331,8 @@ final class SnapDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func closeCaptureUI() {
+        regionTask?.cancel()
+        regionTask = nil
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
         toolbar?.orderOut(nil)
         toolbar?.close()

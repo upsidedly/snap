@@ -9,7 +9,7 @@ import Testing
     let context = try #require(CGContext(data: nil, width: 100, height: 100, bitsPerComponent: 8,
         bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
     let image = try #require(context.makeImage())
-    let overlay = SelectionOverlay(snapshot: DisplaySnapshot(screen: screen, image: image), regions: [])
+    let overlay = SelectionOverlay(snapshot: DisplaySnapshot(screen: screen, image: image), windows: [])
     let panel = CapturePanel(screen: screen, view: overlay)
     defer { panel.close() }
     var received: CGRect?
@@ -36,7 +36,7 @@ import Testing
     let context = try #require(CGContext(data: nil, width: 10, height: 10, bitsPerComponent: 8,
         bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
     let image = try #require(context.makeImage())
-    let overlay = SelectionOverlay(snapshot: DisplaySnapshot(screen: screen, image: image), regions: [])
+    let overlay = SelectionOverlay(snapshot: DisplaySnapshot(screen: screen, image: image), windows: [])
     let panel = CapturePanel(screen: screen, view: overlay)
     defer { panel.close() }
     var captured = false

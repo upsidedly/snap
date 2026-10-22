@@ -17,7 +17,8 @@ struct DisplaySnapshot {
     }
 }
 
-struct WindowRegion {
+struct WindowRegion: Equatable, Sendable {
+    // Subregions share their containing window's ID; frame distinguishes each target.
     let id: CGWindowID
     let frame: CGRect
     let title: String
