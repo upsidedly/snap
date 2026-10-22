@@ -9,14 +9,15 @@
   <img src="https://img.shields.io/badge/Privacy-Local_only-555555" alt="Local only">
 </p>
 
-Snap holds the screen still when you start a capture. Drag an area, select a window or capture a full display. The screen stays at its normal brightness. Each mode uses the same frozen image, so small details stay in place.
+Snap holds the screen still when you start a capture. Drag an area, select a section within an app, select a whole window or capture a full display. The screen stays at its normal brightness. Each mode uses the same frozen image, so small details stay in place.
 
 ## Capture
 
-Press **⌘⇧S** to start. Use **← / →** to move between three modes:
+Press **⌘⇧S** to start. Use **← / →** to move between four modes:
 
 - **Select:** drag an area and release to capture it.
-- **Region:** point to a window and click to capture its visible area.
+- **Region:** point to a detected rectangular section within an app and click. The smallest section under the pointer is highlighted. If no section is detected, it selects the window; use Select for an exact custom area.
+- **App:** point to an app window and click to capture its visible area on the current display.
 - **Full Screen:** click to capture the current display.
 
 Snap copies the image to the clipboard. File saving starts **off for each capture**. Press **↑** to turn it on or off. The checkbox in the bottom bar shows the state. When saving is on, Snap writes a PNG to Desktop or your chosen folder.
@@ -26,9 +27,9 @@ Snap copies the image to the clipboard. File saving starts **off for each captur
 | ⌘⇧S | Start a capture |
 | ← / → | Change mode |
 | ↑ | Turn file saving on or off |
-| 1 / 2 / 3 | Choose a mode |
-| Return | Capture a region or full display |
-| Tab | Select another window in Region mode |
+| 1 / 2 / 3 / 4 | Select / Region / App / Full Screen |
+| Return | Capture a region, app window or full display |
+| Tab / Shift-Tab | Select the next / previous target in Region or App mode |
 | Esc | Cancel |
 
 ## Settings

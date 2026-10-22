@@ -12,7 +12,7 @@ struct SelectionCursorTests {
             bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         return SelectionOverlay(snapshot: DisplaySnapshot(screen: screen,
-            image: try #require(context.makeImage())), regions: [])
+            image: try #require(context.makeImage())), windows: [])
     }
 
     @Test func enteringAndMovingOnTheCanvasReplacesThePreviousAppsCursor() throws {
@@ -43,11 +43,11 @@ struct SelectionCursorTests {
             modifierFlags: [], timestamp: 1, windowNumber: 0, context: nil,
             eventNumber: 1, trackingNumber: 0, userData: nil))
 
-        for mode in [CaptureMode.select, .region, .fullScreen] {
+        for mode in CaptureMode.allCases {
             overlay.mode = mode
             NSCursor.arrow.set()
             overlay.cursorUpdate(with: event)
-            #expect(NSCursor.current == (mode == .region ? NSCursor.pointingHand : NSCursor.crosshair))
+            #expect(NSCursor.current == (mode == .region || mode == .app ? NSCursor.pointingHand : NSCursor.crosshair))
         }
     }
 

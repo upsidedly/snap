@@ -2,12 +2,13 @@ import Foundation
 import CoreGraphics
 
 public enum CaptureMode: Int, CaseIterable, Sendable {
-    case select, region, fullScreen
+    case select, region, app, fullScreen
 
     public var title: String {
         switch self {
         case .select: "Select"
         case .region: "Region"
+        case .app: "App"
         case .fullScreen: "Full Screen"
         }
     }

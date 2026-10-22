@@ -5,10 +5,12 @@ import Testing
 
 @Test func arrowKeysWrapBothWays() {
     #expect(CaptureMode.select.stepping(1) == .region)
-    #expect(CaptureMode.region.stepping(1) == .fullScreen)
+    #expect(CaptureMode.region.stepping(1) == .app)
+    #expect(CaptureMode.app.stepping(1) == .fullScreen)
     #expect(CaptureMode.fullScreen.stepping(1) == .select)
     #expect(CaptureMode.select.stepping(-1) == .fullScreen)
-    #expect(CaptureMode.fullScreen.stepping(-1) == .region)
+    #expect(CaptureMode.fullScreen.stepping(-1) == .app)
+    #expect(CaptureMode.app.stepping(-1) == .region)
     #expect(CaptureMode.region.stepping(-1) == .select)
 }
 

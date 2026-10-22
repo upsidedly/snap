@@ -31,7 +31,8 @@ final class CapturePanel: NSPanel {
 @MainActor
 final class SelectionOverlay: NSView {
     let snapshot: DisplaySnapshot
-    let regions: [WindowRegion]
+    let windows: [WindowRegion]
+    private(set) var regions: [WindowRegion] = []
     var onCapture: ((CaptureChoice) -> Void)?
     var onActive: ((SelectionOverlay) -> Void)?
     var onStateChanged: (() -> Void)?
@@ -39,6 +40,8 @@ final class SelectionOverlay: NSView {
     private var start: CGPoint?
     private(set) var selection: CGRect?
     private(set) var hoveredRegion: WindowRegion?
+    private var keyboardTarget = false
+    private var regionDetectionFinished = false
     var savesToFile = false {
         didSet { updateAccessibilityState() }
     }
@@ -55,16 +58,16 @@ final class SelectionOverlay: NSView {
     }
     private let backgroundImage: NSImage
 
-    init(snapshot: DisplaySnapshot, regions: [WindowRegion]) {
+    init(snapshot: DisplaySnapshot, windows: [WindowRegion]) {
         self.snapshot = snapshot
-        self.regions = regions
+        self.windows = windows
         backgroundImage = NSImage(cgImage: snapshot.image, size: snapshot.screen.frame.size)
         super.init(frame: CGRect(origin: .zero, size: snapshot.screen.frame.size))
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Screenshot canvas")
         updateAccessibilityState()
-        setAccessibilityHelp("Drag to capture a rectangle. Left and right arrows change modes. Up toggles file saving. Escape cancels. Use Region or Full Screen with Return for keyboard capture.")
+        setAccessibilityHelp("Drag in Select. Region selects sections within an app. App selects a whole window. Left and right arrows change modes. Tab selects another Region or App target, Return captures, Up toggles file saving, and Escape cancels.")
     }
 
     required init?(coder: NSCoder) { nil }
@@ -72,7 +75,11 @@ final class SelectionOverlay: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     private func updateAccessibilityState() {
-        setAccessibilityValue("\(mode.title), file saving \(savesToFile ? "on" : "off")")
+        let target = (mode == .region || mode == .app) ? hoveredRegion.map {
+            ", \($0.title), \(Int($0.frame.width)) by \(Int($0.frame.height)) points"
+        } ?? "" : ""
+        let detection = mode == .region && !regionDetectionFinished ? ", finding sections" : ""
+        setAccessibilityValue("\(mode.title)\(target)\(detection), file saving \(savesToFile ? "on" : "off")")
     }
 
     override func updateTrackingAreas() {
@@ -89,7 +96,7 @@ final class SelectionOverlay: NSView {
         addCursorRect(bounds, cursor: captureCursor)
     }
 
-    private var captureCursor: NSCursor { mode == .region ? .pointingHand : .crosshair }
+    private var captureCursor: NSCursor { mode == .region || mode == .app ? .pointingHand : .crosshair }
 
     override func cursorUpdate(with event: NSEvent) {
         captureCursor.set()
@@ -103,27 +110,45 @@ final class SelectionOverlay: NSView {
         captureCursor.set()
     }
 
-    override func mouseEntered(with event: NSEvent) { activateAndHover() }
-    override func mouseMoved(with event: NSEvent) { activateAndHover() }
+    override func mouseEntered(with event: NSEvent) { activateAndHover(at: globalPoint(event)) }
+    override func mouseMoved(with event: NSEvent) { activateAndHover(at: globalPoint(event)) }
 
-    private func activateAndHover() {
+    private func activateAndHover(at point: CGPoint) {
         onActive?(self)
         captureCursor.set()
-        updateHover()
+        updateHover(at: point)
     }
 
-    func updateHover() {
-        hoveredRegion = regions.first { $0.frame.contains(NSEvent.mouseLocation) }
+    func setDetectedRegions(_ regions: [WindowRegion]) {
+        self.regions = regions
+        regionDetectionFinished = true
+        if mode == .region && !keyboardTarget { updateHover() }
+        else { updateAccessibilityState() }
+    }
+
+    func updateHover(at point: CGPoint = NSEvent.mouseLocation) {
+        keyboardTarget = false
+        // Find the frontmost window first, so a small section in a covered app never wins.
+        if let window = windows.first(where: { $0.frame.contains(point) }) {
+            hoveredRegion = mode == .region ? regions.filter {
+                $0.id == window.id && $0.frame.contains(point)
+            }.min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height } ?? window : window
+        } else { hoveredRegion = nil }
+        updateAccessibilityState()
         needsDisplay = true
         onStateChanged?()
     }
 
     func cycleRegion(_ direction: Int) {
-        let available = regions.filter { $0.frame.intersects(snapshot.screen.frame) }
+        let available = windows.flatMap { window in
+            mode == .region ? regions.filter { $0.id == window.id } + [window] : [window]
+        }.filter { $0.frame.intersects(snapshot.screen.frame) }
         guard !available.isEmpty else { return }
-        let index = hoveredRegion.flatMap { current in available.firstIndex(where: { $0.id == current.id }) }
+        let index = hoveredRegion.flatMap { current in available.firstIndex(of: current) }
         let next = index.map { ($0 + direction + available.count) % available.count } ?? 0
         hoveredRegion = available[next]
+        keyboardTarget = true
+        updateAccessibilityState()
         needsDisplay = true
         onStateChanged?()
     }
@@ -135,8 +160,8 @@ final class SelectionOverlay: NSView {
         case .select:
             start = localPoint(event)
             selection = nil
-        case .region:
-            updateHover()
+        case .region, .app:
+            updateHover(at: globalPoint(event))
         case .fullScreen: break
         }
         needsDisplay = true
@@ -163,7 +188,7 @@ final class SelectionOverlay: NSView {
         case .select:
             guard let selection, selection.width >= 2, selection.height >= 2 else { return }
             onCapture?(.selection(snapshot, selection))
-        case .region:
+        case .region, .app:
             guard let hoveredRegion else { NSSound.beep(); return }
             onCapture?(.window(snapshot, hoveredRegion))
         case .fullScreen:
@@ -176,10 +201,15 @@ final class SelectionOverlay: NSView {
         return CGPoint(x: min(max(point.x, 0), bounds.width), y: min(max(point.y, 0), bounds.height))
     }
 
+    private func globalPoint(_ event: NSEvent) -> CGPoint {
+        let point = localPoint(event)
+        return CGPoint(x: snapshot.screen.frame.minX + point.x, y: snapshot.screen.frame.maxY - point.y)
+    }
+
     var highlightedRect: CGRect? {
         switch mode {
         case .select: selection
-        case .region: hoveredRegion.map { CaptureGeometry.localTopLeft($0.frame, screen: snapshot.screen.frame) }
+        case .region, .app: hoveredRegion.map { CaptureGeometry.localTopLeft($0.frame, screen: snapshot.screen.frame) }
         case .fullScreen: bounds
         }
     }
@@ -257,7 +287,8 @@ final class CaptureToolbar: NSPanel {
         segments.action = #selector(modeChanged)
         segments.setAccessibilityLabel("Capture mode")
         segments.toolTip = "Left and right arrows cycle capture modes"
-        for (index, text) in ["Drag a rectangle", "Select a window", "Capture the current display"].enumerated() {
+        for (index, text) in ["Drag a rectangle (1)", "Select a section within an app (2)",
+                              "Select a whole app window (3)", "Capture the current display (4)"].enumerated() {
             segments.setToolTip(text, forSegment: index)
         }
         saveButton.controlSize = .small
@@ -265,7 +296,7 @@ final class CaptureToolbar: NSPanel {
         saveButton.contentTintColor = .white
         saveButton.state = .off
         saveButton.cell?.lineBreakMode = .byTruncatingMiddle
-        saveButton.widthAnchor.constraint(lessThanOrEqualToConstant: 88).isActive = true
+        saveButton.widthAnchor.constraint(equalToConstant: 88).isActive = true
         saveButton.toolTip = "Save to Desktop (↑)"
         saveButton.target = self
         saveButton.action = #selector(saveToggled)
@@ -289,6 +320,7 @@ final class CaptureToolbar: NSPanel {
             row.leadingAnchor.constraint(greaterThanOrEqualTo: material.leadingAnchor, constant: 10),
             row.trailingAnchor.constraint(lessThanOrEqualTo: material.trailingAnchor, constant: -10)
         ])
+        setContentSize(NSSize(width: row.fittingSize.width + 20, height: 44))
         update(mode: .select, savesToFile: false, directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop"))
     }
 
