@@ -118,9 +118,152 @@ struct RegionCaptureTests {
         #expect(segments.frame.width >= segments.intrinsicContentSize.width)
         #expect(toolbar.styleMask.contains(.nonactivatingPanel))
     }
+
+    @Test func detectedSidebarDrivesNativeHoverAndCapture() async throws {
+        let (canvas, _, _, _) = try canvas()
+        let screen = canvas.snapshot.screen
+        let context = try #require(CGContext(data: nil, width: 1000, height: 700, bitsPerComponent: 8,
+            bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(gray: 0.12, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 1000, height: 700))
+        context.setFillColor(CGColor(gray: 0.15, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 240, height: 700))
+        context.setFillColor(CGColor(gray: 0.23, alpha: 1))
+        context.fill(CGRect(x: 240, y: 0, width: 1, height: 700))
+        let image = try #require(context.makeImage())
+        let window = WindowRegion(id: 10, frame: screen.frame, title: "App")
+        let overlay = SelectionOverlay(snapshot: DisplaySnapshot(screen: screen, image: image), windows: [window])
+        let panel = CapturePanel(screen: screen, view: overlay)
+        defer { panel.close() }
+        overlay.mode = .region
+        overlay.setDetectedRegions(try await RegionDetector().regions(in: image, screen: screen.frame, windows: [window]))
+        var captured: WindowRegion?
+        overlay.onCapture = { if case let .window(_, region) = $0 { captured = region } }
+        for type in [NSEvent.EventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
+            let event = try #require(NSEvent.mouseEvent(with: type,
+                location: CGPoint(x: screen.frame.width * 0.1, y: screen.frame.height * 0.5),
+                modifierFlags: [], timestamp: 1, windowNumber: panel.windowNumber, context: nil,
+                eventNumber: 1, clickCount: 1, pressure: 1))
+            switch type {
+            case .mouseMoved: overlay.mouseMoved(with: event)
+            case .leftMouseDown: overlay.mouseDown(with: event)
+            default: overlay.mouseUp(with: event)
+            }
+        }
+        let target = try #require(captured)
+        #expect(abs(target.frame.width - screen.frame.width * 0.24) < 4)
+        #expect(abs(target.frame.height - screen.frame.height) < 4)
+    }
 }
 
 struct RegionDetectorTests {
+    @Test func findsAnAppSidebarSeparatedByASubtleDivider() async throws {
+        let context = try #require(CGContext(data: nil, width: 1000, height: 700, bitsPerComponent: 8,
+            bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        // Adjacent panes share the window's edges; they are not isolated picture-like rectangles.
+        context.setFillColor(CGColor(gray: 0.12, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 1000, height: 700))
+        context.setFillColor(CGColor(gray: 0.15, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 240, height: 700))
+        context.setFillColor(CGColor(gray: 0.23, alpha: 1))
+        context.fill(CGRect(x: 240, y: 0, width: 1, height: 700))
+        for y in stride(from: 30, to: 670, by: 28) {
+            context.setFillColor(CGColor(gray: 0.65, alpha: 1))
+            context.fill(CGRect(x: 18, y: y, width: 140, height: 3))
+            context.fill(CGRect(x: 280, y: y, width: 500, height: 3))
+        }
+        let screen = CGRect(x: 0, y: 0, width: 1000, height: 700)
+        let window = WindowRegion(id: 7, frame: screen, title: "App with sidebar")
+        let image = try #require(context.makeImage())
+        let regions = try await RegionDetector().regions(in: image, screen: screen, windows: [window])
+        let point = CGPoint(x: 100, y: 350)
+        let selected = regions.filter { $0.frame.contains(point) }
+            .min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height } ?? window
+        #expect(selected.frame.width < 260, "Region fell back to the whole app window")
+        #expect(selected.frame.height > 650, "Region must identify the sidebar, not a text line")
+    }
+
+    @Test(arguments: [1, 2]) func findsNestedPanesBelowAToolbarAtNativeAndRetinaScale(scale: Int) async throws {
+        let context = try #require(CGContext(data: nil, width: 1000 * scale, height: 700 * scale,
+            bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.scaleBy(x: CGFloat(scale), y: CGFloat(scale))
+        context.setFillColor(CGColor(gray: 0.12, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 1000, height: 700))
+        for (rect, shade) in [(CGRect(x: 0, y: 640, width: 1000, height: 60), 0.18),
+                              (CGRect(x: 0, y: 0, width: 240, height: 640), 0.15),
+                              (CGRect(x: 700, y: 0, width: 300, height: 640), 0.15),
+                              (CGRect(x: 240, y: 300, width: 460, height: 340), 0.14)] {
+            context.setFillColor(CGColor(gray: shade, alpha: 1))
+            context.fill(rect)
+        }
+        context.setFillColor(CGColor(gray: 0.23, alpha: 1))
+        for rect in [CGRect(x: 0, y: 640, width: 1000, height: 1),
+                     CGRect(x: 240, y: 0, width: 1, height: 640),
+                     CGRect(x: 700, y: 0, width: 1, height: 640),
+                     CGRect(x: 240, y: 300, width: 460, height: 1)] { context.fill(rect) }
+        // Content must not be mistaken for a pane boundary.
+        context.setFillColor(CGColor(gray: 0.65, alpha: 1))
+        for y in stride(from: 25, to: 630, by: 24) {
+            for (x, width) in [(18, 130), (275, 220), (735, 160)] {
+                context.fill(CGRect(x: x, y: y, width: width, height: 3))
+            }
+        }
+        let screen = CGRect(x: -1000, y: -200, width: 1000, height: 700)
+        let window = WindowRegion(id: 7, frame: screen, title: "App with nested panes")
+        let image = try #require(context.makeImage())
+        let regions = try await RegionDetector().regions(in: image,
+            screen: screen, windows: [window])
+        for expected in [CGRect(x: -1000, y: -200, width: 240, height: 640),
+                         CGRect(x: -760, y: -200, width: 460, height: 300),
+                         CGRect(x: -760, y: 100, width: 460, height: 340),
+                         CGRect(x: -300, y: -200, width: 300, height: 640)] {
+            let point = CGPoint(x: expected.midX, y: expected.midY)
+            let target = regions.filter { $0.frame.contains(point) }
+                .min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height } ?? window
+            #expect(abs(target.frame.minX - expected.minX) < 4)
+            #expect(abs(target.frame.minY - expected.minY) < 4)
+            #expect(abs(target.frame.width - expected.width) < 4)
+            #expect(abs(target.frame.height - expected.height) < 4)
+        }
+    }
+
+    @Test func aHorizontalDividerKeepsItsAppKitVerticalPosition() throws {
+        let context = try #require(CGContext(data: nil, width: 600, height: 400,
+            bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(gray: 0.12, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 600, height: 400))
+        context.setFillColor(CGColor(gray: 0.25, alpha: 1))
+        context.fill(CGRect(x: 0, y: 300, width: 600, height: 100))
+        let screen = CGRect(x: 0, y: 0, width: 600, height: 400)
+        let image = try #require(context.makeImage())
+        let detector = try #require(PaneDetector(image: image, screen: screen))
+        let regions = try detector.regions(in: screen)
+        #expect(regions.contains { abs($0.minY - 300) < 2 && abs($0.height - 100) < 2 })
+    }
+
+    @Test func photoLikeTextureDoesNotCreateArbitraryPaneSplits() throws {
+        let context = try #require(CGContext(data: nil, width: 256, height: 192,
+            bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        var seed: UInt32 = 42
+        for y in 0..<192 {
+            for x in 0..<256 {
+                seed = seed &* 1664525 &+ 1013904223
+                context.setFillColor(CGColor(red: CGFloat(seed & 255) / 255,
+                    green: CGFloat((seed >> 8) & 255) / 255, blue: CGFloat((seed >> 16) & 255) / 255, alpha: 1))
+                context.fill(CGRect(x: x, y: y, width: 1, height: 1))
+            }
+        }
+        let image = try #require(context.makeImage())
+        let screen = CGRect(x: 0, y: 0, width: 512, height: 384)
+        let detector = try #require(PaneDetector(image: image, screen: screen))
+        #expect(try detector.regions(in: screen).isEmpty)
+    }
+
     private func fixture() throws -> CGImage {
         let context = try #require(CGContext(data: nil, width: 1000, height: 700, bitsPerComponent: 8,
             bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),

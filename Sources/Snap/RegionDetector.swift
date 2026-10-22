@@ -1,20 +1,39 @@
 import CoreGraphics
 import Vision
+import OSLog
 
 /// Finds rectangular sections in the frozen image, without inspecting other apps' accessibility trees.
 actor RegionDetector {
     func regions(in image: CGImage, screen: CGRect, windows: [WindowRegion]) throws -> [WindowRegion] {
         try Task.checkCancellation()
+        var regions: [WindowRegion] = []
+        if let panes = PaneDetector(image: image, screen: screen) {
+            for (index, window) in windows.enumerated() {
+                let visible = window.frame.intersection(screen)
+                guard !visible.isNull,
+                      !windows[..<index].contains(where: { $0.frame.contains(visible) }) else { continue }
+                for frame in try panes.regions(in: window.frame) {
+                    guard windows.first(where: { $0.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) })?.id
+                        == window.id else { continue }
+                    regions.append(WindowRegion(id: window.id, frame: frame, title: window.title))
+                }
+            }
+        }
         let request = VNDetectRectanglesRequest()
         request.maximumObservations = 64
         request.minimumAspectRatio = 0.05
         request.minimumSize = 0.025
         request.minimumConfidence = 0.5
         request.quadratureTolerance = 5
-        try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+        do { try VNImageRequestHandler(cgImage: image, options: [:]).perform([request]) }
+        catch {
+            try Task.checkCancellation()
+            if regions.isEmpty { throw error }
+            Logger(subsystem: "dev.matthew.snap", category: "regions")
+                .error("Rectangle detection failed; pane dividers remain available: \(error.localizedDescription, privacy: .public)")
+        }
         try Task.checkCancellation()
 
-        var regions: [WindowRegion] = []
         for observation in request.results ?? [] {
             let box = observation.boundingBox
             // Vision and AppKit both use a bottom-left origin here.
