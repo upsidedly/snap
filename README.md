@@ -36,6 +36,12 @@ Snap copies the image to the clipboard. File saving starts **off for each captur
 
 Click the Snap icon in the menu bar. The compact popup lets you start a capture, change the save folder, check screen access or quit. Right-click the icon for quick actions.
 
+## Download
+
+Download the latest [release](https://github.com/upsidedly/snap/releases/latest), open the `.dmg`, and drag **Snap** into **Applications**. These builds are for Apple silicon Macs. Quit an older Snap before replacing it.
+
+The app is locally signed and is not notarized. macOS may require first-launch approval in **System Settings → Privacy & Security**.
+
 ## Install from source
 
 Use macOS 14 or later and a full Xcode installation with Swift 6.
@@ -49,7 +55,7 @@ open /Applications/Snap.app
 
 Allow Screen Recording when macOS asks. You can change access in **System Settings → Privacy & Security**.
 
-Quit Snap before installing an update. The script builds and signs the app locally and keeps a backup of an earlier installation. The first build creates a signing key in your login Keychain, then reuses it so screen access survives rebuilds. Updating from an older ad hoc build needs one final Screen Recording approval. There is no notarized download yet.
+Quit Snap before installing an update. The script builds and signs the app locally and keeps a backup of an earlier installation. The first build creates a signing key in your login Keychain, then reuses it so screen access survives rebuilds. Updating from an older ad hoc build needs one final Screen Recording approval.
 
 ## Privacy
 
